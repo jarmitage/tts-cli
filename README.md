@@ -5,7 +5,9 @@ A simple command-line interface for Kokoro TTS.
 ## Installation
 
 ```bash
-pip install tts
+git clone git@github.com:jarmitage/kokoro-tts-cli.git
+cd kokoro-tts-cli
+pip install -e .
 ```
 
 ## Usage
