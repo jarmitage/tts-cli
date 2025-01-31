@@ -156,7 +156,7 @@ def generate_speech(
     language: str = "en-gb",
     voice: str = "bf_isabella",
     speed: float = 1.0,
-    split_pattern: str = r"\n+",
+    split_pattern: Optional[str] = None,
     sample_rate: int = 24000,
     mode: str = "both",
     wait_after_play: bool = True,
@@ -173,7 +173,7 @@ def generate_speech(
         language: Language code (en-us, en-gb, es, fr, hi, it, ja, pt-br, zh)
         voice: Voice ID to use (e.g. bf_alice)
         speed: Speech speed multiplier
-        split_pattern: Regex pattern for splitting text into chunks
+        split_pattern: Regex pattern for splitting text into chunks (None for no splitting)
         sample_rate: Output audio sample rate in Hz
         mode: Output mode ('play', 'save', or 'both')
         wait_after_play: Wait for audio to finish before processing next chunk
@@ -218,15 +218,36 @@ def generate_speech(
     if language not in LANGUAGE_CODES:
         raise ValueError(f"Unsupported language code. Must be one of: {', '.join(LANGUAGE_CODES.keys())}")
     
+    # Handle text input and splitting
+    if isinstance(text, str):
+        # Ensure text ends with sentence-ending punctuation
+        if text and not text.rstrip()[-1] in '.!?':
+            text = text.rstrip() + '.'
+            
+        if split_pattern:
+            texts = [t.strip() for t in re.split(split_pattern, text) if t.strip()]
+            # Ensure each split chunk ends with punctuation
+            texts = [t if t.rstrip()[-1] in '.!?' else t.rstrip() + '.' for t in texts]
+        else:
+            texts = [text]  # Force single item list
+    else:
+        texts = text if text else []  # Handle None case
+    
     # Initialize the TTS pipeline
     pipeline = KPipeline(lang_code=LANGUAGE_CODES[language])
     
+    # Ensure each text chunk is processed as a single unit
+    processed_texts = []
+    for chunk in texts:
+        if chunk:  # Skip empty chunks
+            processed_texts.extend([chunk])
+    
     # Generate and process audio
     generator = pipeline(
-        text,
+        processed_texts,
         voice=voice,
         speed=speed,
-        split_pattern=split_pattern
+        split_pattern=None  # Explicitly disable splitting
     )
     
     # Process all chunks
