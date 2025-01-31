@@ -16,6 +16,7 @@ from bs4 import BeautifulSoup
 import numpy as np
 from enum import Enum, auto
 from dataclasses import dataclass
+import sys
 
 LANGUAGE_CODES = {
     'en-us': 'a',  # American English
@@ -276,6 +277,8 @@ def main():
     Main entry point for the Kokoro TTS command line tool.
     """
     try:
+        if len(sys.argv) == 1:
+            sys.argv.append("--help")
         fire.Fire(generate_speech)
     except Exception as e:
         print(f"Error: {str(e)}")
