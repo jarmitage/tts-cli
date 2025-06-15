@@ -93,4 +93,23 @@ def stitch_audio_files(output_path: Path, filename: str) -> None:
     output_file = output_path / f"{filename}.wav"
     
     run_ffmpeg_stitch(list_file, output_file)
-    cleanup_files(list_file, chunks) 
+    cleanup_files(list_file, chunks)
+
+def play_audio_file(audio_file: str, volume: float = 1.0) -> tuple[bool, str]:
+    """
+    Play an audio file using the system's default audio output.
+    Args:
+        audio_file: Path to the audio file to play
+        volume: Playback volume as a multiplier (0.0-1.0, default 1.0)
+    Returns:
+        (success: bool, message: str)
+    """
+    try:
+        data, samplerate = sf.read(audio_file)
+        volume = max(0.0, min(volume, 1.0))
+        data = data * volume
+        sd.play(data, samplerate)
+        sd.wait()
+        return True, f"Successfully played audio file: {audio_file}"
+    except Exception as e:
+        return False, f"Failed to play audio: {e}" 
