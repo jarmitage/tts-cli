@@ -35,9 +35,9 @@ tts --text 'This text is speaking!' --engine chatterbox
 | `--speed` | 1.0 | Speech speed multiplier |
 | `--split_pattern` | "\n+" | Regex pattern for splitting text into chunks |
 | `--sample_rate` | 24000 | Output audio sample rate in Hz |
-| `--mode` | "both" | Output mode ('play', 'save', or 'both') |
+| `--mode` | "play" | Output mode ('play', 'save', or 'both') |
 | `--wait_after_play` | True | Wait for audio to finish before processing next chunk |
-| `--stitch` | False | Combine all audio chunks into a single file (only in save modes) |
+| `--stitch` | True | Combine all audio chunks into a single file (only in save modes) |
 | `--engine` | "kokoro" | TTS engine to use ('kokoro' or 'chatterbox') |
 | `--device` | None | Device to use for Chatterbox ('cuda', 'mps', or 'cpu'). If None, automatically selects the best available device. |
 | `--audio_prompt_path` | None | Path to audio file for voice cloning (Chatterbox only) |
@@ -97,7 +97,19 @@ tts --text "Hello" --engine chatterbox
 tts --input_file document.md --mode save --output_dir output/
 ```
 
-6. Install it locally in development mode:
+6. Use stdin input (Unix piping):
+```bash
+# Pipe text directly
+echo "Hello world" | tts --language en-gb
+
+# Pipe file contents
+cat document.txt | tts --language en-gb
+
+# Pipe command output
+ls -l | tts --language en-gb
+```
+
+7. Install it locally in development mode:
 ```bash
 cd tts
 pip install -e .

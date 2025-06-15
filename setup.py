@@ -16,7 +16,7 @@ setup(
     ],
     entry_points={
         "console_scripts": [
-            "tts=tts.tts:main",
+            "tts=tts.cli:main",
         ],
     },
     python_requires=">=3.11",
