@@ -17,28 +17,12 @@ import numpy as np
 from enum import Enum, auto
 from dataclasses import dataclass
 import sys
-from .engines import TTSEngine, KokoroEngine, ChatterboxEngine
-
-LANGUAGE_CODES = {
-    'en-us': 'a',  # American English
-    'en-gb': 'b',  # British English
-    'es': 'e',     # Spanish
-    'fr': 'f',     # French
-    'hi': 'h',     # Hindi
-    'it': 'i',     # Italian
-    'ja': 'j',     # Japanese
-    'pt-br': 'p',  # Brazilian Portuguese
-    'zh': 'z'      # Mandarin Chinese
-}
+from .engines import TTSEngine, KokoroEngine, ChatterboxEngine, TTSEngineType
 
 class OutputMode(Enum):
     PLAY = auto()      # Only play audio
     SAVE = auto()      # Only save to file
     BOTH = auto()      # Both play and save
-
-class TTSEngineType(Enum):
-    KOKORO = "kokoro"
-    CHATTERBOX = "chatterbox"
 
 @dataclass
 class AudioChunk:
@@ -197,8 +181,8 @@ def parse_engine_type(engine: str) -> TTSEngineType:
 
 def validate_language(engine_type: TTSEngineType, language: str) -> None:
     """Validate language support for the selected engine."""
-    if engine_type == TTSEngineType.KOKORO and language not in LANGUAGE_CODES:
-        raise ValueError(f"Unsupported language code. Must be one of: {', '.join(LANGUAGE_CODES.keys())}")
+    if engine_type == TTSEngineType.KOKORO and language not in KokoroEngine.LANGUAGE_CODES:
+        raise ValueError(f"Unsupported language code. Must be one of: {', '.join(KokoroEngine.LANGUAGE_CODES.keys())}")
     if engine_type == TTSEngineType.CHATTERBOX and language != "en-gb":
         raise ValueError("Chatterbox currently only supports English (en-gb)")
 
@@ -223,8 +207,14 @@ def read_input_file(input_file: str) -> str:
     else:
         raise ValueError("Input file must be .txt or .md format")
 
-def process_text_chunks(text: str, split_pattern: Optional[str]) -> List[str]:
-    """Process text into chunks for TTS processing."""
+def process_text_chunks(text: str, split_pattern: Optional[str], sentences_per_chunk: int = 3) -> List[str]:
+    """Process text into chunks for TTS processing.
+    
+    Args:
+        text: The input text to process
+        split_pattern: Optional regex pattern for custom splitting
+        sentences_per_chunk: Number of sentences to include in each chunk (default: 3)
+    """
     if not isinstance(text, str):
         return text if text else []
     
@@ -234,17 +224,24 @@ def process_text_chunks(text: str, split_pattern: Optional[str]) -> List[str]:
     
     if split_pattern:
         texts = [t.strip() for t in re.split(split_pattern, text) if t.strip()]
-        # Ensure each split chunk ends with punctuation
-        texts = [t if t.rstrip()[-1] in '.!?' else t.rstrip() + '.' for t in texts]
     else:
-        texts = [text]
+        # Split into individual sentences first
+        sentences = [t.strip() for t in re.split(r'(?<=[.!?])\s+', text) if t.strip()]
+        # Group sentences into chunks
+        texts = []
+        for i in range(0, len(sentences), sentences_per_chunk):
+            chunk = ' '.join(sentences[i:i + sentences_per_chunk])
+            texts.append(chunk)
+    
+    # Ensure each split chunk ends with punctuation
+    texts = [t if t.rstrip()[-1] in '.!?' else t.rstrip() + '.' for t in texts]
     
     return texts
 
 def create_tts_engine(engine_type: TTSEngineType, language: str, device: str) -> TTSEngine:
     """Create and return the appropriate TTS engine."""
     if engine_type == TTSEngineType.KOKORO:
-        return KokoroEngine(language_code=LANGUAGE_CODES[language])
+        return KokoroEngine(language_code=KokoroEngine.LANGUAGE_CODES[language])
     else:  # Chatterbox
         return ChatterboxEngine(device=device)
 
@@ -295,10 +292,11 @@ def generate_speech(
     output_dir: Optional[str] = ".",
     filename: str = "output",
     language: str = "en-gb",
-    voice: str = "bf_isabella",
+    voice: str = KokoroEngine.DEFAULT_VOICE,
     speed: float = 1.0,
     split_pattern: Optional[str] = None,
-    sample_rate: int = 24000,
+    sentences_per_chunk: int = 3,
+    sample_rate: int = KokoroEngine.DEFAULT_SAMPLE_RATE,
     mode: str = "both",
     wait_after_play: bool = True,
     stitch: bool = False,
@@ -320,6 +318,7 @@ def generate_speech(
         voice: Voice ID to use (e.g. bf_alice)
         speed: Speech speed multiplier
         split_pattern: Regex pattern for splitting text into chunks (None for no splitting)
+        sentences_per_chunk: Number of sentences to include in each chunk when using default splitting (default: 3)
         sample_rate: Output audio sample rate in Hz
         mode: Output mode ('play', 'save', or 'both')
         wait_after_play: Wait for audio to finish before processing next chunk
@@ -348,7 +347,7 @@ def generate_speech(
             filename = Path(input_file).stem
     
     # Process text into chunks
-    texts = process_text_chunks(text, split_pattern)
+    texts = process_text_chunks(text, split_pattern, sentences_per_chunk)
     
     # Create TTS engine
     tts_engine = create_tts_engine(engine_type, language, device)

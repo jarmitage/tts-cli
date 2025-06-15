@@ -14,12 +14,12 @@ pip install -e .
 
 Basic usage with Kokoro:
 ```bash
-tts --text "Hello, world!" --language en-gb
+tts --text 'This text is speaking!' --language en-gb
 ```
 
 Basic usage with Chatterbox:
 ```bash
-tts --text "Hello, world!" --engine chatterbox
+tts --text 'This text is speaking!' --engine chatterbox
 ```
 
 ## Command Line Arguments
@@ -64,17 +64,17 @@ tts --text "Hello, world!" --engine chatterbox
 
 1. Convert text to speech using Kokoro:
 ```bash
-tts --text "Hello, world!" --language en-gb
+tts --text 'This text is speaking!' --language en-gb
 ```
 
 2. Convert text to speech using Chatterbox with voice cloning:
 ```bash
-tts --text "Hello, world!" --engine chatterbox --audio_prompt_path reference.wav
+tts --text 'This text is speaking!' --engine chatterbox --audio_prompt_path reference.wav
 ```
 
 3. Convert text with Chatterbox's emotion control:
 ```bash
-tts --text "Hello, world!" --engine chatterbox --exaggeration 0.7 --cfg_weight 0.3
+tts --text 'This text is speaking!' --engine chatterbox --exaggeration 0.7 --cfg_weight 0.3
 ```
 
 4. Use Chatterbox with specific device:
@@ -105,7 +105,7 @@ pip install -e .
 
 After installation, you can use the command `tts` from anywhere in your terminal. For example:
 ```bash
-tts --text "Hello, world!" --language en-gb
+tts --text 'This text is speaking!' --language en-gb
 ```
 
 ## Device Support
