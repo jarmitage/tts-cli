@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
 """
-Kokoro TTS command line tool for generating speech from text in multiple languages.
+TTS command line tool for generating speech from text in multiple languages.
+Supports both Kokoro and Chatterbox TTS engines.
 """
 
 import fire
 import soundfile as sf
 import sounddevice as sd
-from kokoro import KPipeline
 from typing import Optional, Union, List
 from pathlib import Path
 import os
@@ -17,6 +17,7 @@ import numpy as np
 from enum import Enum, auto
 from dataclasses import dataclass
 import sys
+from .engines import TTSEngine, KokoroEngine, ChatterboxEngine
 
 LANGUAGE_CODES = {
     'en-us': 'a',  # American English
@@ -34,6 +35,10 @@ class OutputMode(Enum):
     PLAY = auto()      # Only play audio
     SAVE = auto()      # Only save to file
     BOTH = auto()      # Both play and save
+
+class TTSEngineType(Enum):
+    KOKORO = "kokoro"
+    CHATTERBOX = "chatterbox"
 
 @dataclass
 class AudioChunk:
@@ -110,27 +115,25 @@ def process_audio_chunk(
     
     print("-" * 40)
 
-def stitch_audio_files(output_path: Path, filename: str) -> None:
-    """Combine numbered audio chunks into a single file using ffmpeg."""
-    import subprocess
-    
-    # Create file list for ffmpeg
+def get_audio_chunks(output_path: Path, filename: str) -> List[Path]:
+    """Get sorted list of audio chunk files."""
     chunks = sorted(output_path.glob(f"{filename}_*.wav"))
     if not chunks:
         print("No audio chunks found to stitch")
-        return
-        
-    # Create a temporary file list
+    return chunks
+
+def create_chunk_list_file(chunks: List[Path], output_path: Path) -> Path:
+    """Create a temporary file listing all audio chunks for ffmpeg."""
     list_file = output_path / "chunks.txt"
     with open(list_file, 'w') as f:
         for chunk in chunks:
             f.write(f"file '{chunk.name}'\n")
-    
-    # Output file path
-    output_file = output_path / f"{filename}.wav"
-    
+    return list_file
+
+def run_ffmpeg_stitch(list_file: Path, output_file: Path) -> None:
+    """Run ffmpeg to concatenate audio files."""
+    import subprocess
     try:
-        # Run ffmpeg to concatenate files
         subprocess.run([
             'ffmpeg', '-f', 'concat', '-safe', '0',
             '-i', str(list_file),
@@ -138,16 +141,153 @@ def stitch_audio_files(output_path: Path, filename: str) -> None:
             str(output_file)
         ], check=True)
         print(f"\nSuccessfully combined audio chunks into: {output_file}")
-        
-        # Clean up individual chunks and list file
-        list_file.unlink()
-        for chunk in chunks:
-            chunk.unlink()
-            
     except subprocess.CalledProcessError as e:
         print(f"Error stitching audio files: {e}")
     except Exception as e:
         print(f"Unexpected error during audio stitching: {e}")
+
+def cleanup_files(list_file: Path, chunks: List[Path]) -> None:
+    """Clean up temporary files after stitching."""
+    try:
+        list_file.unlink()
+        for chunk in chunks:
+            chunk.unlink()
+    except Exception as e:
+        print(f"Warning: Error during cleanup: {e}")
+
+def stitch_audio_files(output_path: Path, filename: str) -> None:
+    """Combine numbered audio chunks into a single file using ffmpeg."""
+    # Get audio chunks
+    chunks = get_audio_chunks(output_path, filename)
+    if not chunks:
+        return
+        
+    # Create file list for ffmpeg
+    list_file = create_chunk_list_file(chunks, output_path)
+    
+    # Output file path
+    output_file = output_path / f"{filename}.wav"
+    
+    # Run ffmpeg to concatenate files
+    run_ffmpeg_stitch(list_file, output_file)
+    
+    # Clean up individual chunks and list file
+    cleanup_files(list_file, chunks)
+
+def validate_inputs(text: Optional[str], input_file: Optional[str]) -> None:
+    """Validate input parameters."""
+    if text is None and input_file is None:
+        raise ValueError("Either text or input_file must be provided")
+    if text is not None and input_file is not None:
+        raise ValueError("Cannot provide both text and input_file")
+
+def parse_output_mode(mode: str) -> OutputMode:
+    """Parse and validate output mode."""
+    try:
+        return OutputMode[mode.upper()]
+    except KeyError:
+        raise ValueError(f"Invalid mode: {mode}. Must be 'play', 'save', or 'both'")
+
+def parse_engine_type(engine: str) -> TTSEngineType:
+    """Parse and validate engine type."""
+    try:
+        return TTSEngineType(engine.lower())
+    except ValueError:
+        raise ValueError(f"Invalid engine: {engine}. Must be 'kokoro' or 'chatterbox'")
+
+def validate_language(engine_type: TTSEngineType, language: str) -> None:
+    """Validate language support for the selected engine."""
+    if engine_type == TTSEngineType.KOKORO and language not in LANGUAGE_CODES:
+        raise ValueError(f"Unsupported language code. Must be one of: {', '.join(LANGUAGE_CODES.keys())}")
+    if engine_type == TTSEngineType.CHATTERBOX and language != "en-gb":
+        raise ValueError("Chatterbox currently only supports English (en-gb)")
+
+def prepare_output_directory(output_mode: OutputMode, output_dir: str) -> Optional[Path]:
+    """Prepare output directory if needed."""
+    if output_mode in (OutputMode.SAVE, OutputMode.BOTH):
+        output_path = Path(output_dir)
+        output_path.mkdir(parents=True, exist_ok=True)
+        return output_path
+    return None
+
+def read_input_file(input_file: str) -> str:
+    """Read and process input file based on its type."""
+    input_path = Path(input_file)
+    if not input_path.exists():
+        raise FileNotFoundError(f"Input file not found: {input_file}")
+    
+    if input_path.suffix.lower() == '.md':
+        return read_markdown_file(input_file)
+    elif input_path.suffix.lower() == '.txt':
+        return read_text_file(input_file)
+    else:
+        raise ValueError("Input file must be .txt or .md format")
+
+def process_text_chunks(text: str, split_pattern: Optional[str]) -> List[str]:
+    """Process text into chunks for TTS processing."""
+    if not isinstance(text, str):
+        return text if text else []
+    
+    # Ensure text ends with sentence-ending punctuation
+    if text and not text.rstrip()[-1] in '.!?':
+        text = text.rstrip() + '.'
+    
+    if split_pattern:
+        texts = [t.strip() for t in re.split(split_pattern, text) if t.strip()]
+        # Ensure each split chunk ends with punctuation
+        texts = [t if t.rstrip()[-1] in '.!?' else t.rstrip() + '.' for t in texts]
+    else:
+        texts = [text]
+    
+    return texts
+
+def create_tts_engine(engine_type: TTSEngineType, language: str, device: str) -> TTSEngine:
+    """Create and return the appropriate TTS engine."""
+    if engine_type == TTSEngineType.KOKORO:
+        return KokoroEngine(language_code=LANGUAGE_CODES[language])
+    else:  # Chatterbox
+        return ChatterboxEngine(device=device)
+
+def process_chunks(
+    engine: TTSEngine,
+    processed_texts: List[str],
+    output_mode: OutputMode,
+    output_path: Optional[Path],
+    filename: str,
+    voice: str,
+    speed: float,
+    audio_prompt_path: Optional[str],
+    exaggeration: float,
+    cfg_weight: float,
+    wait_after_play: bool
+) -> None:
+    """Process all text chunks through the TTS engine."""
+    for i, chunk_text in enumerate(processed_texts):
+        # Generate audio using the selected engine
+        graphemes, phonemes, audio = engine.generate(
+            chunk_text,
+            voice=voice,
+            speed=speed,
+            audio_prompt_path=audio_prompt_path,
+            exaggeration=exaggeration,
+            cfg_weight=cfg_weight
+        )
+        
+        chunk = AudioChunk(
+            text=graphemes,
+            phonemes=phonemes,
+            audio=audio,
+            index=i
+        )
+        
+        process_audio_chunk(
+            chunk=chunk,
+            output_mode=output_mode,
+            output_path=output_path,
+            filename=filename,
+            sample_rate=engine.sample_rate,
+            wait_after_play=wait_after_play
+        )
 
 def generate_speech(
     text: Optional[str] = None,
@@ -162,9 +302,14 @@ def generate_speech(
     mode: str = "both",
     wait_after_play: bool = True,
     stitch: bool = False,
+    engine: str = "kokoro",
+    device: Optional[str] = None,
+    audio_prompt_path: Optional[str] = None,
+    exaggeration: float = 0.5,
+    cfg_weight: float = 0.5,
 ) -> None:
     """
-    Generate speech from text using Kokoro TTS.
+    Generate speech from text using either Kokoro or Chatterbox TTS.
 
     Args:
         text: Direct input text to convert to speech
@@ -179,94 +324,49 @@ def generate_speech(
         mode: Output mode ('play', 'save', or 'both')
         wait_after_play: Wait for audio to finish before processing next chunk
         stitch: If True, combine all audio chunks into a single file (only in save modes)
+        engine: TTS engine to use ('kokoro' or 'chatterbox')
+        device: Device to use for Chatterbox ('cuda', 'mps', or 'cpu'). If None, automatically selects the best available device.
+        audio_prompt_path: Path to audio file for voice cloning (Chatterbox only)
+        exaggeration: Emotion exaggeration control (Chatterbox only, 0.0-1.0)
+        cfg_weight: Configuration weight (Chatterbox only, 0.0-1.0)
     """
     # Input validation
-    if text is None and input_file is None:
-        raise ValueError("Either text or input_file must be provided")
-    if text is not None and input_file is not None:
-        raise ValueError("Cannot provide both text and input_file")
+    validate_inputs(text, input_file)
     
-    # Parse output mode
-    try:
-        output_mode = OutputMode[mode.upper()]
-    except KeyError:
-        raise ValueError(f"Invalid mode: {mode}. Must be 'play', 'save', or 'both'")
+    # Parse and validate modes and engine
+    output_mode = parse_output_mode(mode)
+    engine_type = parse_engine_type(engine)
+    validate_language(engine_type, language)
     
-    # Validate output directory for save modes
-    output_path = None
-    if output_mode in (OutputMode.SAVE, OutputMode.BOTH):
-        output_path = Path(output_dir)
-        output_path.mkdir(parents=True, exist_ok=True)
+    # Prepare output directory
+    output_path = prepare_output_directory(output_mode, output_dir)
     
     # Handle file input
     if input_file is not None:
-        input_path = Path(input_file)
-        if not input_path.exists():
-            raise FileNotFoundError(f"Input file not found: {input_file}")
-        
-        # Process based on file type
-        if input_path.suffix.lower() == '.md':
-            text = read_markdown_file(input_file)
-        elif input_path.suffix.lower() == '.txt':
-            text = read_text_file(input_file)
-        else:
-            raise ValueError("Input file must be .txt or .md format")
-        
-        # Use input filename as output filename if not specified
+        text = read_input_file(input_file)
         if filename == "output":
-            filename = input_path.stem
-
-    if language not in LANGUAGE_CODES:
-        raise ValueError(f"Unsupported language code. Must be one of: {', '.join(LANGUAGE_CODES.keys())}")
+            filename = Path(input_file).stem
     
-    # Handle text input and splitting
-    if isinstance(text, str):
-        # Ensure text ends with sentence-ending punctuation
-        if text and not text.rstrip()[-1] in '.!?':
-            text = text.rstrip() + '.'
-            
-        if split_pattern:
-            texts = [t.strip() for t in re.split(split_pattern, text) if t.strip()]
-            # Ensure each split chunk ends with punctuation
-            texts = [t if t.rstrip()[-1] in '.!?' else t.rstrip() + '.' for t in texts]
-        else:
-            texts = [text]  # Force single item list
-    else:
-        texts = text if text else []  # Handle None case
+    # Process text into chunks
+    texts = process_text_chunks(text, split_pattern)
     
-    # Initialize the TTS pipeline
-    pipeline = KPipeline(lang_code=LANGUAGE_CODES[language])
-    
-    # Ensure each text chunk is processed as a single unit
-    processed_texts = []
-    for chunk in texts:
-        if chunk:  # Skip empty chunks
-            processed_texts.extend([chunk])
-    
-    # Generate and process audio
-    generator = pipeline(
-        processed_texts,
-        voice=voice,
-        speed=speed,
-        split_pattern=None  # Explicitly disable splitting
-    )
+    # Create TTS engine
+    tts_engine = create_tts_engine(engine_type, language, device)
     
     # Process all chunks
-    for i, (graphemes, phonemes, audio) in enumerate(generator):
-        chunk = AudioChunk(
-            text=graphemes,
-            phonemes=phonemes,
-            audio=audio,
-            index=i
-        )
-        process_audio_chunk(
-            chunk=chunk,
-            output_mode=output_mode,
-            output_path=output_path,
-            filename=filename,
-            sample_rate=sample_rate,
-            wait_after_play=wait_after_play
-        )
+    process_chunks(
+        engine=tts_engine,
+        processed_texts=texts,
+        output_mode=output_mode,
+        output_path=output_path,
+        filename=filename,
+        voice=voice,
+        speed=speed,
+        audio_prompt_path=audio_prompt_path,
+        exaggeration=exaggeration,
+        cfg_weight=cfg_weight,
+        wait_after_play=wait_after_play
+    )
     
     # Stitch audio files if requested and in a save mode
     if stitch and output_path and output_mode in (OutputMode.SAVE, OutputMode.BOTH):

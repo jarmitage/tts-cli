@@ -9,6 +9,7 @@ setup(
         "soundfile",
         "sounddevice",
         "kokoro",  # make sure this is the correct package name
+        "chatterbox-tts",  # add Chatterbox TTS support
         "markdown",
         "beautifulsoup4",
         "numpy",
@@ -21,7 +22,7 @@ setup(
     python_requires=">=3.11",
     author="Your Name",
     author_email="your.email@example.com",
-    description="Kokoro TTS command line tool",
+    description="TTS command line tool supporting Kokoro and Chatterbox engines",
     long_description=open("README.md").read(),
     long_description_content_type="text/markdown",
     classifiers=[
